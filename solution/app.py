@@ -40,11 +40,17 @@ def generate_app(get_processed_inputs, inpaint):
             raise gr.Error(str(e))
 
 
-    def run(raw_image, mask, prompt, negative_prompt, cfg, seed):
-
+    def run(raw_image, mask, prompt, negative_prompt, cfg, seed, invert):
+        
+        amask = np.array(mask)
+        
+        if bool(invert):
+            gr.Info("Inverting mask")
+            amask = ~amask
+        
         gr.Info("Inpainting... (this will take up to a few minutes)")
         try:
-            inpainted = inpaint(raw_image, np.array(mask), prompt, negative_prompt, seed, cfg)
+            inpainted = inpaint(raw_image, amask, prompt, negative_prompt, seed, cfg)
         except Exception as e:
             raise gr.Error(str(e))
 
@@ -55,17 +61,18 @@ def generate_app(get_processed_inputs, inpaint):
 
         gr.Markdown(
         """
-        # Background swap
+        # Image inpainting
         1. Select an image by clicking on the first canvas. A square image would work best.
         2. Click a few times *slowly* on different points of the subject 
            you want to keep. For example, in the Mona Lisa example, click multiple times on different areas of Mona 
            Lisa's skin.
         3. Click on "run SAM". This will show you the mask that will be used. If you don't like the mask, 
            retry again point 2 (note: points are NOT kept from the previous try)
-        4. Write a prompt (and optionally a negative prompt) for what you want to generate as the background of your 
-           subject. Adjust the CFG scale and the seed if needed.
-        5. Click on "run inpaint". If you are not happy with the result, change your prompts and/or the 
-           settings (CFG scale, random seed) and click "run inpaint" again.
+        4. Write a prompt (and optionally a negative prompt) for what you want to generate for the infilling. 
+           Adjust the CFG scale and the seed if needed. You can also invert the mask, i.e., infill the subject 
+           instead of the background.
+        5. Click on "run inpaint" and wait for up to two minutes. If you are not happy with the result, 
+           change your prompts and/or the settings (CFG scale, random seed) and click "run inpaint" again.
 
         > NOTE: the generation of the background can take up to a couple of minutes. Be patient!
 
@@ -110,6 +117,9 @@ def generate_app(get_processed_inputs, inpaint):
                 label="Random seed", 
                 value=74294536, 
                 precision=0
+            )
+            checkbox = gr.Checkbox(
+                label="Invert mask"
             )
 
         with gr.Row():
@@ -167,7 +177,8 @@ def generate_app(get_processed_inputs, inpaint):
                 prompt, 
                 neg_prompt,
                 cfg,
-                random_seed
+                random_seed,
+                checkbox
             ], 
             outputs=[result]
         )
