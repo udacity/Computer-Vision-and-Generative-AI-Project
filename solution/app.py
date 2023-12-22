@@ -1,62 +1,125 @@
 import gradio as gr
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 input_points = []
+IMG_SIZE = 512
+input_image = None
 
 def generate_app(get_processed_inputs, inpaint):
-    HEIGHT = 512
-    WIDTH = 512
-
+    
+    global input_points
+    global input_image
+    
     def get_points(img, evt: gr.SelectData):
         
-        global input_points
+        global input_image
+        
+        # The first time this is called, we save the untouched
+        # input image
+        if len(input_points) == 0:
+            input_image = img.copy()
         
         x = evt.index[0]
         y = evt.index[1]
 
         input_points.append([x, y])
+        
+        # Run SAM
+        sam_output = run_sam()
+        
+        # Mark selected points with a green crossmark
+        draw = ImageDraw.Draw(img)
+        size = 10
+        for point in input_points:
 
-        gr.Info(f"Added point {x}, {y}")
+            x, y = point
+
+            draw.line((x - size, y, x + size, y), fill="green", width=5)
+            draw.line((x, y - size, x, y + size), fill="green", width=5)
+        
+        return sam_output, img
 
 
-    def run_sam(raw_image):
-        global input_points
+    def run_sam():
+        
+        if input_image is None:
+            raise gr.Error("No points provided. Click on the image to select the object to segment with SAM")
         
         try:
-
-            if len(input_points) == 0:
-                raise gr.Error("No points provided. Click on the image to select the object to segment with SAM")
-
-            gr.Info(f"Received {len(input_points)} points, processing with SAM")
-            mask = get_processed_inputs(raw_image, [input_points])
-
-            input_points = []
-
-            res_mask = Image.fromarray(mask).resize((HEIGHT, WIDTH))
-
-            return res_mask
+            
+            mask = get_processed_inputs(input_image, [input_points])
+            
+            res_mask = np.array(Image.fromarray(mask).resize((IMG_SIZE, IMG_SIZE)))
+            
+            return (
+                input_image.resize((IMG_SIZE, IMG_SIZE)), 
+                [
+                    (res_mask, "background"), 
+                    (~res_mask, "subject")
+                ]
+            )
         except Exception as e:
             raise gr.Error(str(e))
 
 
-    def run(raw_image, mask, prompt, negative_prompt, cfg, seed, invert):
+    def run(prompt, negative_prompt, cfg, seed, invert):
+
+        if input_image is None:
+            raise gr.Error("No points provided. Click on the image to select the object to segment with SAM")
         
-        amask = np.array(mask)
+        amask = run_sam()[1][0][0]
         
         if bool(invert):
-            gr.Info("Inverting mask")
+            what = 'subject'
             amask = ~amask
+        else:
+            what = 'background'
         
-        gr.Info("Inpainting... (this will take up to a few minutes)")
+        gr.Info(f"Inpainting {what}... (this will take up to a few minutes)")
         try:
-            inpainted = inpaint(raw_image, amask, prompt, negative_prompt, seed, cfg)
+            inpainted = inpaint(input_image, amask, prompt, negative_prompt, seed, cfg)
         except Exception as e:
             raise gr.Error(str(e))
 
-        return inpainted
+        return inpainted.resize((IMG_SIZE, IMG_SIZE))
+    
+    def reset_points(*args):
+        
+        input_points.clear()
+    
+    
+    def preprocess(input_img):
+        
+        if input_img is None:
+            return None
+        
+        # Make sure the image is square
+        width, height = input_img.size
+        
+        if width != height:
+            
+            gr.Warning("Image is not square, adding white padding")
 
+            # Determine the size for the new square image
+            new_size = max(width, height)
 
+            # Create a new image with the desired size and background color
+            # Change 'black' to your desired background color if needed
+            new_image = Image.new("RGB", (new_size, new_size), 'white')
+            
+            # Calculate the position to paste the original image onto the new image
+            left = (new_size - width) // 2
+            top = (new_size - height) // 2
+
+            # Paste the original image onto the new image
+            new_image.paste(input_img, (left, top))
+            
+            input_img = new_image
+        
+        return input_img.resize((IMG_SIZE, IMG_SIZE))
+    
+    
     with gr.Blocks() as demo:
 
         gr.Markdown(
@@ -82,36 +145,44 @@ def generate_app(get_processed_inputs, inpaint):
         """)
 
         with gr.Row():
-            input_img = gr.Image(
+            
+            # This is what the user will interact with
+            display_img = gr.Image(
                 label="Input", 
                 interactive=True, 
                 type='pil',
-                height=HEIGHT,
-                width=WIDTH
+                height=IMG_SIZE,
+                width=IMG_SIZE
             )
-            input_img.select(get_points, inputs=[input_img])
 
-            sam_mask = gr.Image(
+            sam_mask = gr.AnnotatedImage(
                 label="SAM result",
                 interactive=False,
-                type='pil',
-                height=HEIGHT,
-                width=WIDTH,
-                elem_id="sam_mask"
+                height=IMG_SIZE,
+                width=IMG_SIZE,
+                color_map={"background": "#a89a00"}
             )
 
             result = gr.Image(
                 label="Output",
                 interactive=False,
                 type='pil',
-                height=HEIGHT,
-                width=WIDTH,
-                elem_id="output_image"
-            )
-
+                height=IMG_SIZE,
+                width=IMG_SIZE,
+            )            
+        
+        # Events
+        display_img.select(get_points, inputs=[display_img], outputs=[sam_mask, display_img])
+        display_img.clear(reset_points)
+        display_img.change(preprocess, inputs=[display_img], outputs=[display_img])
+        
         with gr.Row():
             cfg = gr.Slider(
-                label="Classifier-Free Guidance Scale", minimum=0.0, maximum=20.0, value=7, step=0.05
+                label="Classifier-Free Guidance Scale", 
+                minimum=0.0, 
+                maximum=20.0, 
+                value=7, 
+                step=0.05
             )
             random_seed = gr.Number(
                 label="Random seed", 
@@ -119,7 +190,7 @@ def generate_app(get_processed_inputs, inpaint):
                 precision=0
             )
             checkbox = gr.Checkbox(
-                label="Invert mask"
+                label="Infill subject instead \nof background"
             )
 
         with gr.Row():
@@ -129,15 +200,28 @@ def generate_app(get_processed_inputs, inpaint):
             neg_prompt = gr.Textbox(
                 label="Negative prompt"
             )
-            submit_sam = gr.Button(value="run SAM")
-            submit_inpaint = gr.Button(value="run inpaint")
+            
+            reset_points_b = gr.ClearButton(
+                value="Reset", 
+                components=[
+                    display_img, 
+                    sam_mask, 
+                    result,
+                    prompt,
+                    neg_prompt,
+                    checkbox
+                ]
+            )
+            reset_points_b.click(reset_points)
+            
+            submit_inpaint = gr.Button(value="Run inpaint")
 
         with gr.Row():
             examples = gr.Examples(
                 [
                     [
                         "car.png", 
-                        "a car driving on the Mars. Studio lights, 1970s", 
+                        "a car driving on planet Mars. Studio lights, 1970s", 
                         "artifacts, low quality, distortion",
                         74294536
                     ],
@@ -155,7 +239,7 @@ def generate_app(get_processed_inputs, inpaint):
                     ]
                 ],
                 inputs=[
-                    input_img,
+                    display_img,
                     prompt,
                     neg_prompt,
                     random_seed
@@ -163,17 +247,9 @@ def generate_app(get_processed_inputs, inpaint):
 
             )
 
-        submit_sam.click(
-            fn=run_sam,
-            inputs=[input_img],
-            outputs=[sam_mask]
-        )
-
         submit_inpaint.click(
             fn=run, 
             inputs=[
-                input_img, 
-                sam_mask,
                 prompt, 
                 neg_prompt,
                 cfg,
