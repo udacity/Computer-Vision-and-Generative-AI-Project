@@ -125,23 +125,18 @@ def generate_app(get_processed_inputs, inpaint):
         gr.Markdown(
         """
         # Image inpainting
-        1. Select an image by clicking on the first canvas. A square image would work best.
-        2. Click a few times *slowly* on different points of the subject 
-           you want to keep. For example, in the Mona Lisa example, click multiple times on different areas of Mona 
-           Lisa's skin.
-        3. Click on "run SAM". This will show you the mask that will be used. If you don't like the mask, 
-           retry again point 2 (note: points are NOT kept from the previous try)
-        4. Write a prompt (and optionally a negative prompt) for what you want to generate for the infilling. 
+        1. Upload an image by clicking on the first canvas.
+        2. Click on the subject you would like to keep. Immediately SAM will be run and you will see the results. If you
+           are happy with those results move to the next step, otherwise add more points to refine your mask.
+        3. Write a prompt (and optionally a negative prompt) for what you want to generate for the infilling. 
            Adjust the CFG scale and the seed if needed. You can also invert the mask, i.e., infill the subject 
-           instead of the background.
-        5. Click on "run inpaint" and wait for up to two minutes. If you are not happy with the result, 
+           instead of the background by toggling the relative checkmark.
+        4. Click on "run inpaint" and wait for up to two minutes. If you are not happy with the result, 
            change your prompts and/or the settings (CFG scale, random seed) and click "run inpaint" again.
-
-        > NOTE: the generation of the background can take up to a couple of minutes. Be patient!
 
         # EXAMPLES
         Scroll down to see a few examples. Click on an example and the image and the prompts will be filled for you. 
-        Note however that you still need to do step 2, 3, and 5.
+        Note however that you still need to do step 2 and 4.
         """)
 
         with gr.Row():
